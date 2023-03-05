@@ -1,0 +1,57 @@
+- name: windows
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+
+    - name: create rsa key pair
+      amazon.aws.ec2_key:
+        name: Administrator
+        key_type: rsa
+      register: key
+
+    - name: download private key
+      copy: content="{{ key.key.private_key }}" dest="administrator.pem" mode=0600
+
+    - name: create security group
+      amazon.aws.ec2_group:
+        name: rdp
+        description: allow remote windows
+        vpc_id: vpc-xxxx
+        region: ap-southeast-3
+        rules:
+          - proto: tcp
+            ports: 3389
+            cidr_ip: 0.0.0.0/0
+      register: sgroup
+
+    - name: create instance
+      amazon.aws.ec2_instance:
+        name: windows
+        vpc_subnet_id: subnet-xxxx
+        image_id: ami-019fd4e0ba82e7e28
+        instance_type: t3.micro
+        key_name: "{{ key.key.name }}"
+        security_group: "{{ sgroup.group_id }}"
+        state: present
+        volumes:
+          - device_name: /dev/sda1
+            ebs:
+              volume_size: 30
+              volume_type: gp2
+              delete_on_termination: true
+#        user_data: "{{ lookup('file','user_data') }}"
+        wait: true
+      register: instance
+
+    - name: get the Administrator password
+      community.aws.ec2_win_password:
+        instance_id: "{{ instance.instances[0].instance_id }}"
+        region: ap-southeast-3
+        key_file: administrator.pem
+        wait: true
+      register: password
+
+    - name: show password
+      debug:
+        msg: "{{ password.win_password }}"
